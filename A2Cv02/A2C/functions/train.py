@@ -1,6 +1,7 @@
 from .const import *
 from .functions import graphResults
 import time
+from tqdm import tqdm
 
 def train(actor, learner, config, saver = None):
     """
@@ -31,7 +32,7 @@ def train(actor, learner, config, saver = None):
     return testAR, testRV
 
 
-def trainSync(actors, learner, config, saver = None):
+def trainSync(actors, learner, config, saver = None, writer = None):
     """
         A2C function to train agents initialized with ray, 
         in a synchronous fashion.
@@ -44,9 +45,12 @@ def trainSync(actors, learner, config, saver = None):
     """
     # Test administration variables
     episodes, freqTest = config["episodes_train"], config["freq_test"]
+    nEpi = config["n-step"]
     testAR, testRV, testS = [], [], []
     totEpisodes, lastTot, lastTest = 0, 0, 0
     startTime, totTime = time.time(), 0
+
+    bar = tqdm(range(episodes))
 
     if saver is not None:
         model = ray.get(learner.model.remote())
@@ -55,7 +59,7 @@ def trainSync(actors, learner, config, saver = None):
     while totEpisodes < episodes:
         # Testing perfomance
         if (totEpisodes - lastTest) >= freqTest:
-            print("Starting testing", end="")
+            bar.write("Starting testing . . .", end="")
             results = ray.get([actor.test.remote(False) for actor in actors])
             ein, zwei, drei = 0,0,0
             # Upack results
@@ -69,28 +73,35 @@ def trainSync(actors, learner, config, saver = None):
             testRV += [zwei]
             testS += [drei]
             lastTest = totEpisodes
-            print(" -- Test Completed, mean accumulated Reward {:.2f}".format(ein))
+            if writer is not None:
+                t = totEpisodes * nEpi
+                writer.add_scalar("test/mean return", ein, t)
+                writer.add_scalar("test/mean steps", zwei, t)
+                writer.add_scalar("test/variance return", drei, t)
+            bar.write("Test Completed, mean accumulated Reward {:.2f}".format(ein))
         # Start running actors
         runningActors = [actor.developEpisode.remote() for actor in actors]
         # Obtain grads from agents
         for i in range(len(runningActors)):
             [ready], runningActors = ray.wait(runningActors)
             grad, episode = ray.get(ready)
-            totEpisodes += episode
+            totEpisodes += 1
             ray.get(learner.addGrads.remote(grad))
-        if totEpisodes != lastTot:
+            bar.update()
+        """if totEpisodes != lastTot:
             elapsedTime = time.time() - startTime
             startTime = time.time()
             totTime += elapsedTime
-            print("Completed episodes {} of {} in {:d}m:{:.1f}s".format(totEpisodes, episodes, int(elapsedTime) // 60, elapsedTime % 60))
-            lastTot = totEpisodes
+            print("Completed epochs {} of {} in {:d}m:{:.1f}s".format(totEpisodes, episodes, int(elapsedTime) // 60, elapsedTime % 60))
+            lastTot = totEpisodes"""
         # Calculate and Sync latest parameters
         newParams, key = ray.get(learner.optimize.remote())
         # Sync params
         ray.get([actor.updateAC.remote(newParams, key) for actor in actors])
         if saver is not None:
             saver.check()
-            
+
+    bar.close()
     return testAR, testRV
 
 

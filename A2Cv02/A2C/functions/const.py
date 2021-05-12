@@ -5,6 +5,7 @@
 # Importations here
 import numpy as np
 import math
+import random
 from numba import njit
 from numba.typed import List
 
@@ -52,3 +53,21 @@ config = {
         "episodes_train" : 10**3,
         "freq_test" : 100,
     }
+
+def seeder(seed:int):
+    """
+        Function to seed all the experiments.
+        Some random generation such as the environment
+        may work with their unique seeds.
+
+        parameters
+        ----------
+        seed: int
+            Positive integer
+        device: torch.device
+    """
+    assert seed > 0, "seed must to be a positive number"
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    
